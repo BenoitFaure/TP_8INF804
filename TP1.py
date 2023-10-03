@@ -40,7 +40,23 @@ def make_bb(image, reference):
     # Get grayscale
     img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     ref = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
+
+    img = cv2.equalizeHist(img)
     
+    hist1 = cv2.calcHist([img], [0], None, [256], [0, 256])
+    hist2 = cv2.calcHist([ref], [0], None, [256], [0, 256])
+
+    cdf1 = hist1.cumsum()
+    cdf2 = hist2.cumsum()
+
+    cdf1_normalized = cdf1 / cdf1.max()
+    cdf2_normalized = cdf2 / cdf2.max()
+
+    mapping = np.interp(cdf1_normalized, cdf2_normalized, np.arange(256))
+
+    equalized_image1 = mapping[img]
+    img = np.uint8(equalized_image1)
+
     # Take difference
     diff_image = cv2.absdiff(img, ref)
 
@@ -49,25 +65,96 @@ def make_bb(image, reference):
 
     # Dilate image
     kernel = np.ones((10, 10),np.uint8)
-    # mortho_img = cv2.dilate(thr_img, kernel, iterations=5)
-    # kernel = np.ones((2, 2),np.uint8)
-    # mortho_img = cv2.morphologyEx(mortho_img, cv2.MORPH_BLACKHAT, kernel)
-    # mortho_img = cv2.erode(thr_img, kernel, iterations=5)
-    # mortho_img = cv2.morphologyEx(thr_img, cv2.MORPH_TOPHAT, kernel)
-    mortho_img = cv2.erode(thr_img, kernel, iterations = 2)
-    mortho_img = cv2.dilate(mortho_img, kernel, iterations=5)
-    mortho_img = cv2.erode(mortho_img, kernel, iterations=3)
-
+    mortho_img = thr_img
+    mortho_img = cv2.dilate(mortho_img, kernel, iterations=1)
+    mortho_img = cv2.erode(mortho_img, kernel, iterations=2)
 
     # Find contours in the thresholded image
     contours, _ = cv2.findContours(mortho_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Iterate through the detected contours and draw bounding boxes
-    for contour in contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    # Make bounding boxes
+    bbs = [[*cv2.boundingRect(contour)] for contour in contours]
 
-    return thr_img, image
+
+
+    # Get area and of bounding boxes
+    areas = [bb[2] * bb[3] for bb in bbs]
+
+    # Numpy arrays for ease
+    bbs = np.array(bbs)
+    areas = np.array(areas)
+
+    # Switch to x, y, xp, yp
+    bbs[:, 2] = bbs[:, 0] + bbs[:, 2]
+    bbs[:, 3] = bbs[:, 1] + bbs[:, 3]
+
+    # Filter by size
+    area_th = 5000
+    mask_area = areas > area_th
+
+    bbs = bbs[mask_area, :]
+    areas = areas[mask_area]
+
+    # Combine by overlap
+    def combine_bbs(sim_bbs):
+
+        x = sim_bbs[:, 0].min()
+        y = sim_bbs[:, 1].min()
+        xp = sim_bbs[:, 2].max()
+        yp = sim_bbs[:, 3].max()
+
+        return [x, y, xp, yp]
+
+    def overlap(a, b):
+
+        intersection = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+
+        area_a = (a[2] - a[0]) * (a[3] - a[1])
+        area_b = (b[2] - b[0]) * (b[3] - b[1])
+
+        return intersection / min(area_a, area_b)
+
+
+    def get_all_overlap(bb, others):
+
+        combine = []
+        exclude = []
+        for b in others:
+            
+            if overlap(bb, b) > 0.1:
+                combine.append(b)
+            else:
+                exclude.append(b)
+        
+        return combine, exclude
+    
+    bbs = bbs.tolist()
+    clean_run = False
+    while not clean_run:
+        clean_run = True
+        new_bbs = []
+        while len(bbs) > 0:
+
+            bb = bbs.pop(0)
+            combine, bbs = get_all_overlap(bb, bbs)
+
+            if len(combine) > 0:
+                clean_run = False
+
+            combine.append(bb)
+            new = combine_bbs(np.array(combine))
+            new_bbs.append(new)
+        
+        bbs = new_bbs
+
+
+
+    # Iterate through the detected contours and draw bounding boxes
+    for bb in bbs:
+        x, y, xp, yp = bb
+        cv2.rectangle(image, (x, y), (xp, yp), (0, 255, 0), 5)
+
+    return thr_img, mortho_img, image
 
 
 mask = load_mask(folders[0])
@@ -78,5 +165,7 @@ mkbb = make_bb(load_other_images(folders[0])[0] * mask, load_reference_image(fol
 cv2.imshow('make bb 1', cv2.resize(mkbb[0], (780, 540),
                interpolation = cv2.INTER_LINEAR))
 cv2.imshow('make bb 2', cv2.resize(mkbb[1], (780, 540),
+               interpolation = cv2.INTER_LINEAR))
+cv2.imshow('make bb 3', cv2.resize(mkbb[2], (780, 540),
                interpolation = cv2.INTER_LINEAR))
 cv2.waitKey(0)
