@@ -14,10 +14,11 @@ def load_reference_image(folder: str) -> np.array:
     return cv2.imread(f"{images_folder}\{folder}\Reference.jpg")
 
 def load_mask(folder: str) -> np.array:
-    image = cv2.imread(f"{images_folder}\{folder}\Mask.jpg", cv2.IMREAD_GRAYSCALE)
+    image = cv2.imread(f"{images_folder}\{folder}\Mask.JPG")
 
-    image[image < 125] = 0
-    image[image > 0] = 1
+    mask = image < 1
+    image[mask] = 0
+    image[np.bitwise_not(mask)] = 1
 
     return image
 
@@ -32,3 +33,6 @@ def load_other_images(folder: str) -> List[np.array]:
 
     return images
 
+cv2.imshow('mask', cv2.resize(load_mask(folders[0]), (780, 540),
+               interpolation = cv2.INTER_LINEAR))
+cv2.waitKey(0)
