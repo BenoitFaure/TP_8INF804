@@ -61,7 +61,7 @@ def extr_bb(img_c, image):
     bbs[:, 3] = bbs[:, 1] + bbs[:, 3]
 
     # Filter by size
-    area_th = 5000
+    area_th = 7000
     mask_area = areas > area_th
 
     bbs = bbs[mask_area, :]
@@ -129,8 +129,8 @@ def extr_bb(img_c, image):
 def make_bb(image, reference, mask):
 
     # Image to grayscale
-    img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) * mask
-    ref = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY) * mask
+    img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    ref = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
 
     # Find contours
     kernel = np.ones((100, 100), np.float32) / 10000
@@ -138,231 +138,24 @@ def make_bb(image, reference, mask):
     ref_c = cv2.absdiff(ref, cv2.filter2D(ref, -1, kernel))
 
     # Calculate diff
-    diff_c = cv2.absdiff(img_c, ref_c)
+    diff_c = cv2.absdiff(img_c, ref_c) * mask
 
     # Threshold
-    _, thr_c = cv2.threshold(diff_c, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    return diff_c, thr_c, extr_bb(diff_c, image)
-
-def make_bb2(image, reference, mask):
-
-    # Get grayscale
-    img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    ref = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
-
-    # # Equalise images
-    # img = cv2.equalizeHist(img)
-    
-    # hist1 = cv2.calcHist([img], [0], None, [256], [0, 256])
-    # hist2 = cv2.calcHist([ref], [0], None, [256], [0, 256])
-
-    # cdf1 = hist1.cumsum()
-    # cdf2 = hist2.cumsum()
-
-    # cdf1_normalized = cdf1 / cdf1.max()
-    # cdf2_normalized = cdf2 / cdf2.max()
-
-    # mapping = np.interp(cdf1_normalized, cdf2_normalized, np.arange(256))
-
-    # equalized_image1 = mapping[img]
-    # img = np.uint8(equalized_image1)
-
-    # Add mask
-    img *= mask
-    ref *= mask
-
-    # Take difference
-    diff_image = cv2.absdiff(img, ref)
-
-    # Extract important areas
-    #   Get threshold
-    obj_map = diff_image
-    _, obj_map = cv2.threshold(obj_map, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    #   Keep only important areas
-    obj_image = diff_image * obj_map
-
-
-    # Extract polution
-    #   Get polution map
-    polution_map = obj_image
-
-    kernel = np.ones((100, 100), np.float32) / 10000
-    polution_map = cv2.filter2D(polution_map, -1, kernel)
-
-    _, polution_map = cv2.threshold(polution_map, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-
-
-    # Get grayscale
-    img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) * polution_map
-    ref = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY) * polution_map
-
-    # Equalise images
-    img = cv2.equalizeHist(img)
-    
-    hist1 = cv2.calcHist([img], [0], None, [256], [0, 256])
-    hist2 = cv2.calcHist([ref], [0], None, [256], [0, 256])
-
-    cdf1 = hist1.cumsum()
-    cdf2 = hist2.cumsum()
-
-    cdf1_normalized = cdf1 / cdf1.max()
-    cdf2_normalized = cdf2 / cdf2.max()
-
-    mapping = np.interp(cdf1_normalized, cdf2_normalized, np.arange(256))
-
-    equalized_image1 = mapping[img]
-    img = np.uint8(equalized_image1)
-
-    # Add mask
-    img *= mask
-    ref *= mask
-
-    # Take difference
-    diff_image2 = cv2.absdiff(img, ref)
-
-    int_img = diff_image2 * polution_map
-    real_min = np.min(int_img[int_img > 0])
-    int_img[int_img < 1] = real_min
-
-    _, th2 = cv2.threshold(int_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    return diff_image * polution_map, polution_map * 255, th2
-
-    # Get polution
-    polution = diff_image
-    _, polution = cv2.threshold(polution, 110, np.max(polution), cv2.THRESH_BINARY)
-
-    polution = cv2.absdiff(diff_image, polution)
-
-    kernel = np.ones((100, 100), np.float32) / 10000
-    polution = cv2.filter2D(polution, -1, kernel)
-
-    #   Remove low value noise
-    # _, pol_mask = cv2.threshold(polution, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # polution = polution * pol_mask
-
-    polution = np.max(polution) - polution
-    pol_mask = polution / np.max(polution)
-
-    # Remove polution
-    thr_img = (diff_image * pol_mask).astype(np.uint8)
-    
-    # Threshold image
-    _, thr_img = cv2.threshold(thr_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    thr_c = diff_c
+    _, thr_c = cv2.threshold(thr_c, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     # Morthology
-    mortho_img = thr_img
+    mortho_c = thr_c
+    kernel = np.ones((4, 4),np.uint8) / 16
+    mortho_c = cv2.erode(mortho_c, kernel, iterations=2)
 
-    #   Remove granularity
-    # kernel = np.ones((3, 3),np.uint8) / 9
-    # mortho_img = cv2.erode(mortho_img, kernel, iterations=10)
-    # mortho_img = cv2.dilate(mortho_img, kernel, iterations=10)
+    kernel = np.ones((30, 30),np.uint8) / 900
+    mortho_c = cv2.dilate(mortho_c, kernel, iterations=2)
 
-
-    #   Remove small features
-    # kernel = np.ones((10, 10),np.uint8) / 100
-    # mortho_img = cv2.erode(mortho_img, kernel, iterations=1)
-    # mortho_img = cv2.dilate(mortho_img, kernel, iterations=2)
-
-    return diff_image, polution, thr_img
-
-    # Find contours in the thresholded image
-    contours, _ = cv2.findContours(mortho_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return diff_c, mortho_c, extr_bb(mortho_c, image)
 
 
-
-    # Make bounding boxes
-    bbs = [[*cv2.boundingRect(contour)] for contour in contours]
-
-    # Get area and of bounding boxes
-    areas = [bb[2] * bb[3] for bb in bbs]
-
-    # Numpy arrays for ease
-    bbs = np.array(bbs)
-    areas = np.array(areas)
-    
-    # Check if bbs
-    if len(bbs.shape) < 2:
-        return diff_image, thr_img, image
-
-    # Switch to x, y, xp, yp
-    bbs[:, 2] = bbs[:, 0] + bbs[:, 2]
-    bbs[:, 3] = bbs[:, 1] + bbs[:, 3]
-
-    # Filter by size
-    area_th = 5000
-    mask_area = areas > area_th
-
-    bbs = bbs[mask_area, :]
-    areas = areas[mask_area]
-
-    # Combine by overlap
-    def combine_bbs(sim_bbs):
-
-        x = sim_bbs[:, 0].min()
-        y = sim_bbs[:, 1].min()
-        xp = sim_bbs[:, 2].max()
-        yp = sim_bbs[:, 3].max()
-
-        return [x, y, xp, yp]
-
-    def overlap(a, b):
-
-        intersection = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
-
-        area_a = (a[2] - a[0]) * (a[3] - a[1])
-        area_b = (b[2] - b[0]) * (b[3] - b[1])
-
-        return intersection / min(area_a, area_b)
-
-
-    def get_all_overlap(bb, others):
-
-        combine = []
-        exclude = []
-        for b in others:
-            
-            if overlap(bb, b) > 0.1:
-                combine.append(b)
-            else:
-                exclude.append(b)
-        
-        return combine, exclude
-    
-    bbs = bbs.tolist()
-    clean_run = False
-    while not clean_run:
-        clean_run = True
-        new_bbs = []
-        while len(bbs) > 0:
-
-            bb = bbs.pop(0)
-            combine, bbs = get_all_overlap(bb, bbs)
-
-            if len(combine) > 0:
-                clean_run = False
-
-            combine.append(bb)
-            new = combine_bbs(np.array(combine))
-            new_bbs.append(new)
-        
-        bbs = new_bbs
-
-
-
-    # Iterate through the detected contours and draw bounding boxes
-    for bb in bbs:
-        x, y, xp, yp = bb
-        cv2.rectangle(image, (x, y), (xp, yp), (0, 255, 0), 5)
-
-    return diff_image, mortho_img, image
-
-
-mkbb = make_bb(load_other_images(folders[0])[5], load_reference_image(folders[0]), load_mask(folders[0])[:, :, 0])
-
+mkbb = make_bb(load_other_images(folders[0])[0], load_reference_image(folders[0]), load_mask(folders[0])[:, :, 0])
 
 
 cv2.imshow('make bb 1', cv2.resize(mkbb[0], (780, 540),
