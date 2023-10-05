@@ -35,13 +35,14 @@ def load_other_images(folder: str) -> List[np.array]:
 
 # ------- DEFINE TECHNIQUE -------
 
-def make_bb(image, reference):
+def make_bb(image, reference, mask):
 
     # Get grayscale
     img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     ref = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
 
-    img = cv2.equalizeHist(img)
+    # Equalise images
+    # img = cv2.equalizeHist(img)
     
     hist1 = cv2.calcHist([img], [0], None, [256], [0, 256])
     hist2 = cv2.calcHist([ref], [0], None, [256], [0, 256])
@@ -56,6 +57,10 @@ def make_bb(image, reference):
 
     equalized_image1 = mapping[img]
     img = np.uint8(equalized_image1)
+
+    # Add mask
+    img *= mask
+    ref *= mask
 
     # Take difference
     diff_image = cv2.absdiff(img, ref)
@@ -158,7 +163,7 @@ def make_bb(image, reference):
 
 
 mask = load_mask(folders[0])
-mkbb = make_bb(load_other_images(folders[0])[0] * mask, load_reference_image(folders[0]) * mask)
+mkbb = make_bb(load_other_images(folders[0])[5], load_reference_image(folders[0]), mask[:, :, 0])
 
 
 
