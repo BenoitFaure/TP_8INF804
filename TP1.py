@@ -6,8 +6,6 @@ import re
 import cv2
 import numpy as np
 
-import matplotlib.pyplot as plt
-
 # ------- IMAGE PROCESS -------
 images_folder = '.\images'
 folders = ['Chambre', 'Cuisine', 'Salon']
