@@ -2,13 +2,14 @@ from typing import List
 
 import os
 import re
+import sys
 
 import cv2
 import numpy as np
 
 # ------- IMAGE PROCESS -------
 images_folder = '.\images'
-folders = ['Chambre', 'Cuisine', 'Salon']
+folders = ['Chambre'    , 'Cuisine', 'Salon']
 
 def load_reference_image(folder: str) -> np.array:
     return cv2.imread(f"{images_folder}\{folder}\Reference.jpg")
@@ -26,10 +27,10 @@ def load_other_images(folder: str) -> List[np.array]:
 
     full_path = f"{images_folder}\{folder}"
     all_files = os.listdir(full_path)
-    filtered_files = [file for file in all_files if file.lower().endswith('.jpg') and file != 'Reference.JPG' and file != 'Mask.JPG']
+    filtered_files = [file for file in all_files if (file.lower().endswith('.jpg') and not file.lower().endswith('_bb.jpg')) and file != 'Reference.JPG' and file != 'Mask.JPG']
 
     full_path += '\\'
-    images = [cv2.imread(full_path + file) for file in filtered_files]
+    images = [(cv2.imread(full_path + file), file) for file in filtered_files]
 
     return images
 
@@ -122,7 +123,7 @@ def extr_bb(img_c, image):
         x, y, xp, yp = bb
         cv2.rectangle(image, (x, y), (xp, yp), (0, 255, 0), 5)
     
-    return image
+    return image, bbs
 
 def make_bb(image, reference, mask):
 
@@ -150,16 +151,45 @@ def make_bb(image, reference, mask):
     kernel = np.ones((30, 30),np.uint8) / 900
     mortho_c = cv2.dilate(mortho_c, kernel, iterations=2)
 
-    return diff_c, mortho_c, extr_bb(mortho_c, image)
+    return extr_bb(mortho_c, image)
 
 
-mkbb = make_bb(load_other_images(folders[0])[0], load_reference_image(folders[0]), load_mask(folders[0])[:, :, 0])
+# ------- BATCH PROCESS -------
 
+for folder in folders:
+    print(f'Starting folder {folder}')
 
-cv2.imshow('make bb 1', cv2.resize(mkbb[0], (780, 540),
-               interpolation = cv2.INTER_LINEAR))
-cv2.imshow('make bb 2', cv2.resize(mkbb[1], (780, 540),
-               interpolation = cv2.INTER_LINEAR))
-cv2.imshow('make bb 3', cv2.resize(mkbb[2], (780, 540),
-               interpolation = cv2.INTER_LINEAR))
-cv2.waitKey(0)
+    # Load images
+    ref_img = load_reference_image(folder)
+    mask = load_mask(folder)[:, :, 0]
+    other_img = load_other_images(folder)
+
+    # Calculate floor surface
+    floor_surface = np.sum(mask > 0)
+
+    # Progress bar
+    n_img = len(other_img)
+    c = 0
+
+    for img, img_name in other_img:
+        # Get bounding boxes for image
+        img_bb, bbs = make_bb(img, ref_img, mask)
+
+        # Calculate occupied area
+        occupied_area = 0
+        for bb in bbs:
+            occupied_area += (bb[2] - bb[0]) * (bb[3] - bb[1])
+
+        # Add info to image
+        cv2.putText(img_bb, f"{len(bbs)} objects | Clutter {(occupied_area / floor_surface * 100):.2f}%", 
+                    (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 4, (0, 255, 0), 5, cv2.LINE_AA)
+
+        # Save image
+        cv2.imwrite(f"{images_folder}\{folder}\{re.sub('.JPG', '_bb.JPG', img_name)}", img_bb)
+
+        # Progress bar
+        c += 1
+        msg = f"[{'-' * c}{' ' * (n_img - c)}] {c}/{n_img}"
+        sys.stdout.write(msg)
+        sys.stdout.flush()
+        sys.stdout.write("\b" * len(msg))
