@@ -12,9 +12,24 @@ images_folder = '.\images'
 folders = ['Chambre'    , 'Cuisine', 'Salon']
 
 def load_reference_image(folder: str) -> np.array:
+    """ Loads the reference image mask from a folder and returns the 
+    associated np.array 
+
+    Parameters
+    ----------
+    folder : str
+        The folder the image is taken from
+    """
     return cv2.imread(f"{images_folder}\{folder}\Reference.jpg")
 
 def load_mask(folder: str) -> np.array:
+    """ Loads the mask from a folder and returns the associated np.array 
+
+    Parameters
+    ----------
+    folder : str
+        The folder the mask is taken from
+    """
     image = cv2.imread(f"{images_folder}\{folder}\Mask.JPG")
 
     mask = image < 1
@@ -24,7 +39,13 @@ def load_mask(folder: str) -> np.array:
     return image
 
 def load_other_images(folder: str) -> List[np.array]:
+    """ Loads all the images in the given folder into a list
 
+    Parameters
+    ----------
+    folder : str
+        The folder the images are taken from
+    """
     full_path = f"{images_folder}\{folder}"
     all_files = os.listdir(full_path)
     filtered_files = [file for file in all_files if (file.lower().endswith('.jpg') and not file.lower().endswith('_bb.jpg')) and file != 'Reference.JPG' and file != 'Mask.JPG']
@@ -37,7 +58,16 @@ def load_other_images(folder: str) -> List[np.array]:
 # ------- DEFINE TECHNIQUE -------
 
 def extr_bb(img_c, image):
+    """Extracts the bounding boxes from the image.
 
+    Parameters
+    ----------
+    img_c : np.array
+        The processed B&W image with the objects in white
+    
+    image : np.array
+        The original image
+    """
     # Find contours in the thresholded image
     contours, _ = cv2.findContours(img_c, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -68,7 +98,13 @@ def extr_bb(img_c, image):
 
     # Combine by overlap
     def combine_bbs(sim_bbs):
+        """ Combines an array of bounding boxes into a single bounding box
 
+        Parameters
+        ----------
+        sim_bbs : array 
+            Array containing all the bounding boxes to combine
+        """
         x = sim_bbs[:, 0].min()
         y = sim_bbs[:, 1].min()
         xp = sim_bbs[:, 2].max()
@@ -77,7 +113,15 @@ def extr_bb(img_c, image):
         return [x, y, xp, yp]
 
     def overlap(a, b):
+        """ Indicates the overlap between 2 bounding boxes a and b
 
+        Parameters
+        ----------
+        a : array 
+            The first bounding box
+        b : array 
+            The second bounding box
+        """
         intersection = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
 
         area_a = (a[2] - a[0]) * (a[3] - a[1])
@@ -87,7 +131,17 @@ def extr_bb(img_c, image):
 
 
     def get_all_overlap(bb, others):
+        """ Gives the overlap between the bb bounding box and all the others 
+            in the others array
 
+        Parameters
+        ----------
+        bb : array
+            The first bounding box
+        others : array 
+            An array of bounding boxes
+        """
+        
         combine = []
         exclude = []
         for b in others:
@@ -126,7 +180,17 @@ def extr_bb(img_c, image):
     return image, bbs
 
 def make_bb(image, reference, mask):
-
+    """ Processes the image to find objects then extracts the bounding boxes
+    
+    Parameters
+    ----------
+    image : array
+        The image to process
+    reference : array 
+        The reference image
+    mask : array
+        The mask
+    """
     # Image to grayscale
     img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     ref = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
@@ -143,15 +207,15 @@ def make_bb(image, reference, mask):
     thr_c = diff_c
     _, thr_c = cv2.threshold(thr_c, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # Morthology
-    mortho_c = thr_c
+    # Morphology (White Hat)
+    morpho_c = thr_c
     kernel = np.ones((4, 4),np.uint8) / 16
-    mortho_c = cv2.erode(mortho_c, kernel, iterations=2)
+    morpho_c = cv2.erode(morpho_c, kernel, iterations=2)
 
     kernel = np.ones((30, 30),np.uint8) / 900
-    mortho_c = cv2.dilate(mortho_c, kernel, iterations=2)
+    morpho_c = cv2.dilate(morpho_c, kernel, iterations=2)
 
-    return extr_bb(mortho_c, image)
+    return extr_bb(morpho_c, image)
 
 
 # ------- BATCH PROCESS -------
