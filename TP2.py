@@ -7,6 +7,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from skimage.segmentation import slic
 from skimage.color import label2rgb
+from skimage.feature import canny
+from scipy import ndimage as ndi
 
 def load_images(folder: str = './images/TP2') -> List[np.array]:
     """ Loads all the images in the given folder into a list
@@ -37,6 +39,30 @@ def segment_image(image: np.array) -> np.array:
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
+    # Get contours - apply blur
+    a, b = 100, 100
+    kernel = np.ones((a, b), np.float32) / (a * b)
+    blur = cv2.filter2D(gray, -1, kernel)
+
+    gray_edges = cv2.absdiff(gray, blur)
+
+    canny_edges = canny(gray_edges/255)
+    canny_edges = canny_edges.astype(np.uint8) * 255
+
+    # _, thr_c = cv2.threshold(gray_edges, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, thr_c = cv2.threshold(gray_edges, 10, 255, cv2.THRESH_BINARY)
+    thr_c = 255 - thr_c
+
+    # Find background
+    ret, thresh_back = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+
+    # Remove background
+    cleaned_countours = cv2.bitwise_and(thr_c, thresh_back)
+
+    # Fill holes
+    # filled = ndi.binary_fill_holes(thr_c)
+    # filled = filled.astype(np.uint8) * 255
+
     # Apply Threshold - Triangle
     # ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)
 
@@ -44,7 +70,7 @@ def segment_image(image: np.array) -> np.array:
     # hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
 
     # Apply Threshold
-    ret, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+    # ret, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
 
     # Plot color histogram
     # plt.hist(image.ravel(), 256, [0, 256])
@@ -74,16 +100,16 @@ def segment_image(image: np.array) -> np.array:
     # ret, thresh = cv2.threshold(opening, 127, 255, cv2.THRESH_BINARY)
 
     # Convert to LAB
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    # lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
 
     # Improve contrast on light channel of image using histogram equalization
     # lab[:, :, 0] = cv2.equalizeHist(lab[:, :, 0])
 
     # Clean up light channel
-    lab[:, :, 0] = lab[:, :, 0] * (thresh // 255)
+    # lab[:, :, 0] = lab[:, :, 0] * (thresh // 255)
 
     # Conver lab to rgb
-    img_lab_rgb = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    # img_lab_rgb = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
     # Clean up image
     # n_image = image
@@ -91,15 +117,15 @@ def segment_image(image: np.array) -> np.array:
     # image = n_image.astype(np.uint8)
 
     # Sclic segmentation
-    segments = slic(lab, n_segments=500, sigma=5)
+    # segments = slic(lab, n_segments=500, sigma=5)
 
     # Final segmented rgb image
-    img_rgb = label2rgb(segments, image, kind='avg')
+    # img_rgb = label2rgb(segments, image, kind='avg')
 
     # Threshold again
-    ret, thresh_seg = cv2.threshold(cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # ret, thresh_seg = cv2.threshold(cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    return img_lab_rgb, thresh_seg
+    return gray_edges, thr_c
 
 def run():
     images = load_images()
