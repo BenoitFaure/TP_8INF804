@@ -9,6 +9,7 @@ from skimage.segmentation import slic
 from skimage.color import label2rgb
 from skimage.feature import canny
 from scipy import ndimage as ndi
+from skimage.filters import sobel
 
 def load_images(folder: str = './images/TP2') -> List[np.array]:
     """ Loads all the images in the given folder into a list
@@ -46,7 +47,7 @@ def segment_image(image: np.array) -> np.array:
 
     gray_edges = cv2.absdiff(gray, blur)
 
-    canny_edges = canny(gray_edges/255)
+    canny_edges = canny(gray/255)
     canny_edges = canny_edges.astype(np.uint8) * 255
 
     # _, thr_c = cv2.threshold(gray_edges, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -58,10 +59,11 @@ def segment_image(image: np.array) -> np.array:
 
     # Remove background
     cleaned_countours = cv2.bitwise_and(thr_c, thresh_back)
+    # cleaned_countours = canny(gray_edges/255)
 
     # Fill holes
-    # filled = ndi.binary_fill_holes(thr_c)
-    # filled = filled.astype(np.uint8) * 255
+    filled = ndi.binary_fill_holes(canny_edges)
+    filled = filled.astype(np.uint8) * 255
 
     # Apply Threshold - Triangle
     # ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)
@@ -125,7 +127,7 @@ def segment_image(image: np.array) -> np.array:
     # Threshold again
     # ret, thresh_seg = cv2.threshold(cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    return gray_edges, thr_c
+    return canny_edges, filled
 
 def run():
     images = load_images()
