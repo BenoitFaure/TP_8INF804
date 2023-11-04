@@ -5,11 +5,12 @@ import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from skimage.segmentation import slic
+from skimage.segmentation import slic, mark_boundaries
 from skimage.color import label2rgb
 from skimage.feature import canny
 from scipy import ndimage as ndi
 from skimage.filters import sobel
+from skimage import morphology
 
 def load_images(folder: str = './images/TP2') -> List[np.array]:
     """ Loads all the images in the given folder into a list
@@ -40,94 +41,197 @@ def segment_image(image: np.array) -> np.array:
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Get contours - apply blur
-    a, b = 100, 100
-    kernel = np.ones((a, b), np.float32) / (a * b)
-    blur = cv2.filter2D(gray, -1, kernel)
+    # Section Image Augmentation
+    if True:
 
-    gray_edges = cv2.absdiff(gray, blur)
+        # Augment contrast
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray_clahe = clahe.apply(gray)
 
-    canny_edges = canny(gray/255)
-    canny_edges = canny_edges.astype(np.uint8) * 255
+        gray = gray_clahe
 
-    # _, thr_c = cv2.threshold(gray_edges, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    _, thr_c = cv2.threshold(gray_edges, 10, 255, cv2.THRESH_BINARY)
-    thr_c = 255 - thr_c
+    # Extract background
+    if True:
+            
+            # Extract background
+            ret, thresh_hold_1 = cv2.threshold(gray, 50, 1, cv2.THRESH_BINARY)
+    
+            # # Fill in regions
+            # kernel = np.ones((3, 3), np.uint8) / 9
+            # fill_1 = cv2.dilate(thresh_hold_1, kernel, iterations=1)
+            # fill_1 = cv2.erode(fill_1, kernel, iterations=1)
+    
+            # # Remove small objects
+            # clean_1 = cv2.erode(fill_1, kernel, iterations=3)
+            # clean_1 = cv2.dilate(clean_1, kernel, iterations=3)
+    
+            # # Remove background
+            # cleaned_image = cv2.bitwise_and(image, image, mask=clean_1)
+    
+            bkg = thresh_hold_1
 
-    # Find background
-    ret, thresh_back = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
 
-    # Remove background
-    cleaned_countours = cv2.bitwise_and(thr_c, thresh_back)
-    # cleaned_countours = canny(gray_edges/255)
+    # Section edge detection
+    # Custom edge detection
+    if False:
+        # Get contours - apply blur
+        a, b = 100, 100
+        kernel = np.ones((a, b), np.float32) / (a * b)
+        blur = cv2.filter2D(gray, -1, kernel)
 
-    # Fill holes
-    filled = ndi.binary_fill_holes(canny_edges)
-    filled = filled.astype(np.uint8) * 255
+        gray_edges = cv2.absdiff(gray, blur)
 
-    # Apply Threshold - Triangle
-    # ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)
+        # _, thr_c = cv2.threshold(gray_edges, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, thr_c = cv2.threshold(gray_edges, 10, 255, cv2.THRESH_BINARY)
+        thr_c = 255 - thr_c
 
-    # Get histogram
-    # hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+        # Find background
+        ret, thresh_back = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
 
-    # Apply Threshold
-    # ret, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+        # Remove background
+        cleaned_countours = cv2.bitwise_and(thr_c, thresh_back)
+        # cleaned_countours = canny(gray_edges/255)
 
-    # Plot color histogram
-    # plt.hist(image.ravel(), 256, [0, 256])
-    # plt.show()
+        edge_out = cleaned_countours
 
-    # # Apply Gaussian Blur
-    # blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    # Canny edge detection
+    if False:
+        canny_edges = canny(gray/255)
+        canny_edges = canny_edges.astype(np.uint8) * 255
 
-    # # Apply Canny Edge Detection
-    # edges = cv2.Canny(blur, 100, 200)
+        edge_out = canny_edges
 
-    # # Apply Dilation
-    # kernel = np.ones((5, 5), np.uint8)
+    # Fill Holes
+    if False:
+        # Fill holes
+        filled = ndi.binary_fill_holes(edge_out > 0)
+        filled = filled.astype(np.uint8) * 255
 
-    # dilation = cv2.dilate(edges, kernel, iterations=1)
+    # Height map - Custom
+    if False:
+        # Get contours - apply blur
+        a, b = 100, 100
+        kernel = np.ones((a, b), np.float32) / (a * b)
+        blur = cv2.filter2D(gray, -1, kernel)
 
-    # # Apply Erosion
-    # erosion = cv2.erode(dilation, kernel, iterations=1)
+        gray_edges = cv2.absdiff(gray, blur)
 
-    # # Apply Closing
-    # closing = cv2.morphologyEx(erosion, cv2.MORPH_CLOSE, kernel)
+        # Find background
+        ret, thresh_back = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
 
-    # # Apply Opening
-    # opening = cv2.morphologyEx(closing, cv2.MORPH_OPEN, kernel)
+        # Remove background
+        cleaned_edges = cv2.bitwise_and(gray_edges, thresh_back)
 
-    # # Apply Threshold
-    # ret, thresh = cv2.threshold(opening, 127, 255, cv2.THRESH_BINARY)
+        h_map = cleaned_edges
 
-    # Convert to LAB
-    # lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+        markers = np.zeros_like(h_map, np.uint8)
+        markers[h_map > 100] = 2
+        markers[h_map < 50] = 1
 
-    # Improve contrast on light channel of image using histogram equalization
-    # lab[:, :, 0] = cv2.equalizeHist(lab[:, :, 0])
+    # Watershed method to fill
+    if False:
+        watershed = cv2.watershed(image, markers)
+        filled = watershed#.astype(np.uint8) * 255
 
-    # Clean up light channel
-    # lab[:, :, 0] = lab[:, :, 0] * (thresh // 255)
+    # Watershed method
+    if False:
 
-    # Conver lab to rgb
-    # img_lab_rgb = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        # Extract confused objects
+        ret, thresh_hold_1 = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
 
-    # Clean up image
-    # n_image = image
-    # n_image[thresh == 0] = [0, 0, 0]
-    # image = n_image.astype(np.uint8)
+        # Fill in regions
+        kernel = np.ones((3, 3), np.uint8) / 9
+        fill_1 = cv2.dilate(thresh_hold_1, kernel, iterations=1)
+        fill_1 = cv2.erode(fill_1, kernel, iterations=1)
 
-    # Sclic segmentation
-    # segments = slic(lab, n_segments=500, sigma=5)
+        # Remove small objects
+        clean_1 = cv2.erode(fill_1, kernel, iterations=3)
+        clean_1 = cv2.dilate(clean_1, kernel, iterations=3)
 
-    # Final segmented rgb image
-    # img_rgb = label2rgb(segments, image, kind='avg')
+        # Sure background area
+        sure_bg = cv2.dilate(clean_1,kernel,iterations=3)
+        ret, sure_bg = cv2.threshold(sure_bg, 200, 255, cv2.THRESH_BINARY)
 
-    # Threshold again
-    # ret, thresh_seg = cv2.threshold(cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # Sure foreground area
+        dist_transform = cv2.distanceTransform(clean_1, cv2.DIST_L2, 5)
+        dist_transform = dist_transform.astype(np.uint8)
+        # dist_transform = dist_transform * (255 / dist_transform.max())
 
-    return canny_edges, filled
+        # Remove edges
+        #   Dilate edges
+        # kernel = np.ones((3, 3), np.uint8) / 9
+        # edge_out_dil = cv2.dilate(edge_out, kernel, iterations=3)
+
+        # dist_transform = cv2.subtract(dist_transform, edge_out_dil)
+
+        # Dilate dist_transform
+        # kernel = np.ones((3, 3), np.uint8) / 9
+        kernel = cv2.getGaussianKernel(30, 1)
+        kernel = np.outer(kernel, kernel)
+        kernel /= kernel.sum()
+        # dist_transform_gauss = cv2.dilate(dist_transform, kernel, iterations=3)
+        dist_transform_gauss = cv2.filter2D(dist_transform, -1, kernel)
+
+        dist_transform = dist_transform_gauss
+
+        # canny_edges_dst = canny(dist_transform / np.max(dist_transform))
+        # canny_edges_dst = canny_edges_dst.astype(np.uint8) * 255
+        
+        ret, sure_fg = cv2.threshold(dist_transform,0.7*dist_transform.max(),255,0)
+        # Unknown region
+        sure_fg = np.uint8(sure_fg)
+        unknown = cv2.subtract(sure_bg,sure_fg)
+
+        # Marker labelling
+        ret, markers = cv2.connectedComponents(sure_fg)
+        markers = markers+1
+        # markers = np.zeros_like(sure_fg, np.int32)
+        # markers[sure_fg > 0] = 2
+        # markers[sure_bg < 1] = 1
+        markers[unknown==255] = 0
+
+        # show_marker = np.zeros((markers.shape[0], markers.shape[1], 3), np.uint8)
+        # show_marker[:, :, 0] = (markers == 0) * 255
+        # show_marker[:, :, 1] = (markers == 1) * 255
+        # show_marker[:, :, 2] = (markers == 2) * 255
+
+        segmentation = cv2.watershed(image, markers)
+
+    # Image preprocess
+    image_prepross = np.zeros_like(image, np.uint8)
+    if True:
+        for i in range(3):
+            image_prepross[:, :, i] = cv2.equalizeHist(image[:, :, i])
+
+
+    # Skimage SLIC
+    if True:
+
+        # Slic Segmentation
+        slic_seg = slic(image_prepross, n_segments=250, compactness=20, sigma=1)
+
+        # Apply background
+        segmentation = slic_seg * bkg
+
+    # Clean segmentation - doesnt work well, should maybe do it after combining hyperpixels
+    if False:
+
+        # Remove dark objects that havent been removed by bkg extraction (like reflections)
+        for i in range(segmentation.max()):
+            hyper_pix = cv2.bitwise_and(image, image, mask=(segmentation == i).astype(np.uint8))
+            if hyper_pix.mean() < 20/255:
+                segmentation[segmentation == i] = 0
+
+    # segmented_image = label2rgb(segmentation, image, kind='avg')
+    segmented_image = mark_boundaries(image, segmentation)
+
+    return image_prepross, segmented_image
+    return image_prepross, segmentation / segmentation.max()
+    return image, image_cont
+
+    # return dist_transform, canny_edges_dst
+    # return dist_transform.astype(np.uint8) , sure_fg
+    # return unknown, (segmentation + 1) / (segmentation.max() + 1) * 255
 
 def run():
     images = load_images()
@@ -138,6 +242,30 @@ def run():
     img1, img2 = segment_image(image[0])
     cv2.imshow('Clean', img1)
     cv2.imshow('Segmented', img2)
+
+    def test():
+        im_lab = cv2.cvtColor(image[0], cv2.COLOR_BGR2LAB)
+
+        # Show 3rd channel as hist
+        plt.hist(im_lab[:, :, 2].ravel(), 256, [0, 256])
+        plt.show()
+
+        ret, th_1 = cv2.threshold(im_lab[:, :, 2], 140, 255, cv2.THRESH_BINARY)
+        ret, th_2 = cv2.threshold(im_lab[:, :, 2], 137, 255, cv2.THRESH_BINARY)
+        ret, th_3 = cv2.threshold(im_lab[:, :, 2], 130, 255, cv2.THRESH_BINARY)
+
+        return th_1, th_2, th_3
+
+        return im_lab[:, :, 0], im_lab[:, :, 1], im_lab[:, :, 2]
+        return image[0][:, :, 0], image[0][:, :, 1], image[0][:, :, 2]
+
+    # A, B, C = test()
+
+    # cv2.imshow('A', A)
+    # cv2.imshow('B', B)
+    # cv2.imshow('C', C)
+    # cv2.imshow('concat', (A/3 + B/3 + C/3).astype(np.uint8))
+
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
