@@ -244,13 +244,13 @@ def segment_image(image: np.array) -> np.array:
     if True:
 
         # Get all image channels
+        image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        image_lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
         B = image[:, :, 0]
         G = image[:, :, 1]
         R = image[:, :, 2]
-        image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        image_lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
 
-        channels = [B, G, R, image_hsv, image_lab]
+        channels = [image_hsv, image_lab]
 
         print("Extracted Channels")
 
@@ -267,20 +267,31 @@ def segment_image(image: np.array) -> np.array:
             # Extract features
             features = []
             for channel in channels:
+                print(channel.shape)
                 features.extend(extract_features(channel[superpixel_mask]))
+            #   Extract Deg of luminance
+            deg_of_lum = np.mean(0.299*R[superpixel_mask] + 0.587*G[superpixel_mask] + 0.114*B[superpixel_mask], axis=0)
+            features.append(deg_of_lum)
 
             # Store superpixel and feature
             super_pixels.append((j, superpixel_mask))
             super_pixels_features.append(features)
+
+            # Show color histogram for superpixel
+            plt.hist(image[superpixel_mask, 1].ravel(), 256, [0, 256])
+            plt.show()
+            exit()
         
-        super_pixels_features = np.array(super_pixels_features)
+        super_pixels_features = np.array(super_pixels_features) + 1
 
         print("Extracted Features")
         
         # Do clustering on features
-        super_pixels_cluster = KMeans(n_clusters=5).fit_predict(super_pixels_features)
+        super_pixels_cluster = KMeans(n_init='auto').fit_predict(super_pixels_features)
 
         print("Clustered")
+
+        base_segmented_image = mark_boundaries(image, segmentation)
 
         # Assign ids to superpixels
         for i in range(len(super_pixels)):
@@ -291,7 +302,7 @@ def segment_image(image: np.array) -> np.array:
     # segmented_image = label2rgb(segmentation, image, kind='avg')
     segmented_image = mark_boundaries(image, segmentation)
 
-    return image_prepross, segmented_image
+    return base_segmented_image, segmented_image
     return image_prepross, segmentation / segmentation.max()
     return image, image_cont
 
