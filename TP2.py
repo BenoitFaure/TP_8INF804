@@ -11,6 +11,8 @@ from skimage.feature import canny
 from scipy import ndimage as ndi
 from skimage.filters import sobel
 from skimage import morphology
+from scipy.stats import skew, kurtosis
+from sklearn.cluster import KMeans
 
 def load_images(folder: str = './images/TP2') -> List[np.array]:
     """ Loads all the images in the given folder into a list
@@ -200,6 +202,7 @@ def segment_image(image: np.array) -> np.array:
     # Image preprocess
     image_prepross = np.zeros_like(image, np.uint8)
     if True:
+
         for i in range(3):
             image_prepross[:, :, i] = cv2.equalizeHist(image[:, :, i])
 
@@ -213,14 +216,77 @@ def segment_image(image: np.array) -> np.array:
         # Apply background
         segmentation = slic_seg * bkg
 
-    # Clean segmentation - doesnt work well, should maybe do it after combining hyperpixels
+    # Clean segmentation - doesnt work well, should maybe do it after combining superpixels
     if False:
 
         # Remove dark objects that havent been removed by bkg extraction (like reflections)
-        for i in range(segmentation.max()):
-            hyper_pix = cv2.bitwise_and(image, image, mask=(segmentation == i).astype(np.uint8))
-            if hyper_pix.mean() < 20/255:
+        for i in range(1, segmentation.max() + 1):
+            super_pix = cv2.bitwise_and(image, image, mask=(segmentation == i).astype(np.uint8))
+            if super_pix.mean() < 20/255:
                 segmentation[segmentation == i] = 0
+
+
+    # Function to extract features from superpixel
+    def extract_features(superpixel: np.array) -> np.array:
+
+        mean = np.mean(superpixel, axis=0)
+        std = np.std(superpixel, axis=0)
+        skewness = skew(superpixel, axis=0)
+        kurt = kurtosis(superpixel, axis=0)
+
+        channel_features = np.array([mean, std, skewness, kurt]).flatten()
+        channel_features = np.nan_to_num(channel_features, 0)
+
+        return channel_features
+
+
+    # Combine superpixels
+    if True:
+
+        # Get all image channels
+        B = image[:, :, 0]
+        G = image[:, :, 1]
+        R = image[:, :, 2]
+        image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        image_lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+
+        channels = [B, G, R, image_hsv, image_lab]
+
+        print("Extracted Channels")
+
+        super_pixels = []
+        super_pixels_features = []
+
+        # Loop through superpixels and extract features
+        for j in range(1, segmentation.max() + 1):
+
+            superpixel_mask = segmentation == j
+            if superpixel_mask.sum() == 0:
+                continue
+
+            # Extract features
+            features = []
+            for channel in channels:
+                features.extend(extract_features(channel[superpixel_mask]))
+
+            # Store superpixel and feature
+            super_pixels.append((j, superpixel_mask))
+            super_pixels_features.append(features)
+        
+        super_pixels_features = np.array(super_pixels_features)
+
+        print("Extracted Features")
+        
+        # Do clustering on features
+        super_pixels_cluster = KMeans(n_clusters=5).fit_predict(super_pixels_features)
+
+        print("Clustered")
+
+        # Assign ids to superpixels
+        for i in range(len(super_pixels)):
+            segmentation[segmentation == super_pixels[i][0]] = super_pixels_cluster[i]
+
+
 
     # segmented_image = label2rgb(segmentation, image, kind='avg')
     segmented_image = mark_boundaries(image, segmentation)
