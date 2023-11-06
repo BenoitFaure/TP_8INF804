@@ -13,6 +13,7 @@ from skimage.filters import sobel
 from skimage import morphology
 from scipy.stats import skew, kurtosis
 from sklearn.cluster import KMeans
+from skimage import graph
 
 def load_images(folder: str = './images/TP2') -> List[np.array]:
     """ Loads all the images in the given folder into a list
@@ -51,6 +52,13 @@ def segment_image(image: np.array) -> np.array:
         gray_clahe = clahe.apply(gray)
 
         gray = gray_clahe
+    
+    # Image preprocess
+    image_prepross = np.zeros_like(image, np.uint8)
+    if True:
+
+        for i in range(3):
+            image_prepross[:, :, i] = cv2.equalizeHist(image[:, :, i])
 
     # Extract background
     if True:
@@ -71,6 +79,8 @@ def segment_image(image: np.array) -> np.array:
             # cleaned_image = cv2.bitwise_and(image, image, mask=clean_1)
     
             bkg = thresh_hold_1
+
+    
 
 
     # Section edge detection
@@ -197,112 +207,216 @@ def segment_image(image: np.array) -> np.array:
         # show_marker[:, :, 1] = (markers == 1) * 255
         # show_marker[:, :, 2] = (markers == 2) * 255
 
-        segmentation = cv2.watershed(image, markers)
+        ws_seg = cv2.watershed(image_prepross, markers)
 
-    # Image preprocess
-    image_prepross = np.zeros_like(image, np.uint8)
+        segmentation = ws_seg
+
+    # Blur for feature extraction
     if True:
 
-        for i in range(3):
-            image_prepross[:, :, i] = cv2.equalizeHist(image[:, :, i])
+        # Clean image
+        cleaned_image = cv2.bitwise_and(image, image, mask=bkg)
 
+        # Blur image
+        blured_image = cv2.GaussianBlur(cleaned_image, (101, 101), 0)
 
-    # Skimage SLIC
-    if True:
+        # Convert to LAB
+        blured_image_lab = cv2.cvtColor(blured_image, cv2.COLOR_BGR2LAB)
+        blured_image_hsv = cv2.cvtColor(blured_image, cv2.COLOR_BGR2HSV)
 
-        # Slic Segmentation
-        slic_seg = slic(image_prepross, n_segments=250, compactness=20, sigma=1)
+        # Cluster pixels by AB channels
+        # pixel_features = blured_image_lab[:, :, 1:].reshape(-1, 2)
+        msk = bkg != 0
+        # pixel_features = blured_image_lab[msk, 1:]
+        pixel_features = np.concatenate((blured_image_lab, blured_image_hsv), axis=2)[msk, :]
+        labels = KMeans(n_clusters=20, n_init='auto').fit_predict(pixel_features)
+        
+        # Reshape to 2D array
+        # labels = labels.reshape(blured_image_lab.shape[:2])
+        n_img = np.zeros_like(blured_image_lab[:, :, 1])
+        c = 0
+        for i in range(n_img.shape[0]):
+            for j in range(n_img.shape[1]):
+                if msk[i, j]:
+                    n_img[i, j] = labels[c]
+                    c += 1
 
-        # Apply background
-        segmentation = slic_seg * bkg
+        # return blured_image_lab, n_img / n_img.max()
 
-    # Clean segmentation - doesnt work well, should maybe do it after combining superpixels
+    # Watershed method 1.1
     if False:
 
-        # Remove dark objects that havent been removed by bkg extraction (like reflections)
-        for i in range(1, segmentation.max() + 1):
-            super_pix = cv2.bitwise_and(image, image, mask=(segmentation == i).astype(np.uint8))
-            if super_pix.mean() < 20/255:
-                segmentation[segmentation == i] = 0
+        # Extract confused objects
+        ret, thresh_hold_1 = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+
+        # Fill in regions
+        kernel = np.ones((3, 3), np.uint8) / 9
+        fill_1 = cv2.dilate(thresh_hold_1, kernel, iterations=1)
+        fill_1 = cv2.erode(fill_1, kernel, iterations=1)
+
+        # Remove small objects
+        clean_1 = cv2.erode(fill_1, kernel, iterations=3)
+        clean_1 = cv2.dilate(clean_1, kernel, iterations=3)
+
+        # Sure background area
+        sure_bg = cv2.dilate(clean_1,kernel,iterations=3)
+        ret, sure_bg = cv2.threshold(sure_bg, 200, 255, cv2.THRESH_BINARY)
+
+        # Sure foreground area
+        dist_transform = cv2.distanceTransform(clean_1, cv2.DIST_L2, 5)
+        dist_transform = dist_transform.astype(np.uint8)
+
+        # Dilate dist_transform
+        # kernel = np.ones((3, 3), np.uint8) / 9
+        # kernel = cv2.getGaussianKernel(30, 1)
+        # kernel = np.outer(kernel, kernel)
+        # kernel /= kernel.sum()
+        # # dist_transform_gauss = cv2.dilate(dist_transform, kernel, iterations=3)
+        # dist_transform_gauss = cv2.filter2D(dist_transform, -1, kernel)
+        # dist_transform_gauss = cv2.GaussianBlur(dist_transform, (31, 31), 0)
+
+        kernel = np.array([[1, 1, 1], [1, 5, 1], [1, 1, 1]])
+        kernel = kernel / (kernel.sum() * 0.9)
+        dist_transform_gauss = cv2.filter2D(dist_transform, -1, kernel)
+
+        dist_transform = dist_transform_gauss
+        
+        ret, sure_fg = cv2.threshold(dist_transform,0.7*dist_transform.max(),255,0)
+        # Unknown region
+        sure_fg = np.uint8(sure_fg)
+        unknown = cv2.subtract(sure_bg,sure_fg)
+
+        # Marker labelling
+        ret, markers = cv2.connectedComponents(sure_fg)
+        markers = markers+1
+        markers[unknown==255] = 0
 
 
-    # Function to extract features from superpixel
-    def extract_features(superpixel: np.array) -> np.array:
+        # ws_img = image_prepross
+        # ws_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        # ws_img = cv2.cvtColor(image_prepross, cv2.COLOR_BGR2LAB)
 
-        mean = np.mean(superpixel, axis=0)
-        std = np.std(superpixel, axis=0)
-        skewness = skew(superpixel, axis=0)
-        kurt = kurtosis(superpixel, axis=0)
+        # Blur image
+        ws_img = cv2.GaussianBlur(image, (101, 101), 0)
 
-        channel_features = np.array([mean, std, skewness, kurt]).flatten()
-        channel_features = np.nan_to_num(channel_features, 0)
+        ws_seg = cv2.watershed(ws_img, markers)
 
-        return channel_features
+        segmentation = ws_seg
 
+        return ws_img, segmentation / segmentation.max()
 
-    # Combine superpixels
+    # Slic + Feature + Kmeans
     if True:
+        # Skimage SLIC
+        if True:
 
-        # Get all image channels
-        image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        image_lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-        B = image[:, :, 0]
-        G = image[:, :, 1]
-        R = image[:, :, 2]
+            # Slic Segmentation
+            slic_seg = slic(image_prepross, n_segments=300, compactness=20, sigma=1)
 
-        channels = [image_hsv, image_lab]
+            # Apply background
+            segmentation = slic_seg * bkg
 
-        print("Extracted Channels")
-
-        super_pixels = []
-        super_pixels_features = []
-
-        # Loop through superpixels and extract features
-        for j in range(1, segmentation.max() + 1):
-
-            superpixel_mask = segmentation == j
-            if superpixel_mask.sum() == 0:
-                continue
-
-            # Extract features
-            features = []
-            for channel in channels:
-                print(channel.shape)
-                features.extend(extract_features(channel[superpixel_mask]))
-            #   Extract Deg of luminance
-            deg_of_lum = np.mean(0.299*R[superpixel_mask] + 0.587*G[superpixel_mask] + 0.114*B[superpixel_mask], axis=0)
-            features.append(deg_of_lum)
-
-            # Store superpixel and feature
-            super_pixels.append((j, superpixel_mask))
-            super_pixels_features.append(features)
-
-            # Show color histogram for superpixel
-            plt.hist(image[superpixel_mask, 1].ravel(), 256, [0, 256])
-            plt.show()
-            exit()
-        
-        super_pixels_features = np.array(super_pixels_features) + 1
-
-        print("Extracted Features")
-        
-        # Do clustering on features
-        super_pixels_cluster = KMeans(n_init='auto').fit_predict(super_pixels_features)
-
-        print("Clustered")
-
-        base_segmented_image = mark_boundaries(image, segmentation)
-
-        # Assign ids to superpixels
-        for i in range(len(super_pixels)):
-            segmentation[segmentation == super_pixels[i][0]] = super_pixels_cluster[i]
+        # # Combine watershed and slic
+        # if True:
 
 
+        # Clean segmentation - doesnt work well, should maybe do it after combining superpixels
+        if True:
+
+            # Remove dark objects that havent been removed by bkg extraction (like reflections)
+            for i in range(1, segmentation.max() + 1):
+                super_pix = cv2.bitwise_and(image, image, mask=(segmentation == i).astype(np.uint8))
+                if super_pix.mean() < 20/255:
+                    segmentation[segmentation == i] = 0
+
+        # Function to extract features from superpixel
+        def extract_features(superpixel: np.array) -> np.array:
+
+            mean = np.mean(superpixel, axis=0)
+            std = np.std(superpixel, axis=0)
+            skewness = skew(superpixel, axis=0)
+            kurt = kurtosis(superpixel, axis=0)
+
+            channel_features = np.array([mean, std, skewness, kurt]).flatten()
+            channel_features = np.nan_to_num(channel_features, 0)
+
+            return channel_features
+
+        # Combine superpixels
+        if True:
+
+            # Get all image channels
+            image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            image_lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+            B = image[:, :, 0]
+            G = image[:, :, 1]
+            R = image[:, :, 2]
+
+            channels = [image_hsv, image_lab]
+
+            print("Extracted Channels")
+
+            super_pixels = []
+            super_pixels_features = []
+
+            # Loop through superpixels and extract features
+            for j in range(1, segmentation.max() + 1):
+
+                superpixel_mask = segmentation == j
+                if superpixel_mask.sum() == 0:
+                    continue
+
+                # Extract features
+                features = []
+                for channel in channels:
+                    features.extend(extract_features(channel[superpixel_mask]))
+                #   Extract Deg of luminance
+                deg_of_lum = np.mean(0.299*R[superpixel_mask] + 0.587*G[superpixel_mask] + 0.114*B[superpixel_mask], axis=0)
+                features.append(deg_of_lum)
+                # Add the blured image features
+                features.append(np.argmax(np.bincount(n_img[superpixel_mask])))
+
+                # Store superpixel and feature
+                super_pixels.append((j, superpixel_mask))
+                super_pixels_features.append(features)
+
+                # Show color histogram for superpixel
+                # plt.hist(image[superpixel_mask, 1].ravel(), 256, [0, 256])
+                # plt.show()
+                # exit()
+            
+            super_pixels_features = np.array(super_pixels_features)
+
+            print("Extracted Features")
+            
+            # Do clustering on features
+            super_pixels_cluster = KMeans(n_clusters=15, n_init='auto').fit_predict(super_pixels_features) + 1
+
+            print("Clustered")
+
+            base_segmented_image = mark_boundaries(image, segmentation)
+
+            # Assign ids to superpixels
+            for i in range(len(super_pixels)):
+                segmentation[segmentation == super_pixels[i][0]] = super_pixels_cluster[i]
+
+    # Cuts
+    if False:
+                
+        labels1 = slic(image, compactness=30, n_segments=400, start_label=1)
+        out1 = label2rgb(labels1, image, kind='avg', bg_label=0)
+
+        g = graph.rag_mean_color(image, labels1, mode='similarity')
+        labels2 = graph.cut_normalized(labels1, g)
+        out2 = label2rgb(labels2, image, kind='avg', bg_label=0)
+
+    # return out1, out2
 
     # segmented_image = label2rgb(segmentation, image, kind='avg')
     segmented_image = mark_boundaries(image, segmentation)
 
     return base_segmented_image, segmented_image
+    return image_prepross, segmented_image
     return image_prepross, segmentation / segmentation.max()
     return image, image_cont
 
