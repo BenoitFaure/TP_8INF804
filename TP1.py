@@ -8,8 +8,6 @@ import cv2
 import numpy as np
 
 # ------- IMAGE PROCESS -------
-images_folder = '.\images'
-folders = ['Chambre'    , 'Cuisine', 'Salon']
 
 def load_reference_image(folder: str) -> np.array:
     """ Loads the reference image mask from a folder and returns the 
@@ -20,7 +18,7 @@ def load_reference_image(folder: str) -> np.array:
     folder : str
         The folder the image is taken from
     """
-    return cv2.imread(f"{images_folder}\{folder}\Reference.jpg")
+    return cv2.imread(f"{folder}\Reference.jpg")
 
 def load_mask(folder: str) -> np.array:
     """ Loads the mask from a folder and returns the associated np.array 
@@ -30,7 +28,7 @@ def load_mask(folder: str) -> np.array:
     folder : str
         The folder the mask is taken from
     """
-    image = cv2.imread(f"{images_folder}\{folder}\Mask.JPG")
+    image = cv2.imread(f"{folder}\Mask.JPG")
 
     mask = image < 1
     image[mask] = 0
@@ -46,7 +44,7 @@ def load_other_images(folder: str) -> List[np.array]:
     folder : str
         The folder the images are taken from
     """
-    full_path = f"{images_folder}\{folder}"
+    full_path = folder
     all_files = os.listdir(full_path)
     filtered_files = [file for file in all_files if (file.lower().endswith('.jpg') and not file.lower().endswith('_bb.jpg')) and file != 'Reference.JPG' and file != 'Mask.JPG']
 
@@ -220,40 +218,51 @@ def make_bb(image, reference, mask):
 
 # ------- BATCH PROCESS -------
 
-for folder in folders:
-    print(f'Starting folder {folder}')
+def run(images_folder = '.\images'):
+    folders = [item for item in os.listdir(images_folder) if os.path.isdir(os.path.join(images_folder, item))] # ['Chambre'    , 'Cuisine', 'Salon']
 
-    # Load images
-    ref_img = load_reference_image(folder)
-    mask = load_mask(folder)[:, :, 0]
-    other_img = load_other_images(folder)
+    for folder in folders:
+        print(f'Starting folder {folder}')
 
-    # Calculate floor surface
-    floor_surface = np.sum(mask > 0)
+        # Load images
+        f_path = f"{images_folder}\{folder}"
+        ref_img = load_reference_image(f_path)
+        mask = load_mask(f_path)[:, :, 0]
+        other_img = load_other_images(f_path)
 
-    # Progress bar
-    n_img = len(other_img)
-    c = 0
-
-    for img, img_name in other_img:
-        # Get bounding boxes for image
-        img_bb, bbs = make_bb(img, ref_img, mask)
-
-        # Calculate occupied area
-        occupied_area = 0
-        for bb in bbs:
-            occupied_area += (bb[2] - bb[0]) * (bb[3] - bb[1])
-
-        # Add info to image
-        cv2.putText(img_bb, f"{len(bbs)} objects | Clutter {(occupied_area / floor_surface * 100):.2f}%", 
-                    (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 4, (0, 255, 0), 5, cv2.LINE_AA)
-
-        # Save image
-        cv2.imwrite(f"{images_folder}\{folder}\{re.sub('.JPG', '_bb.JPG', img_name)}", img_bb)
+        # Calculate floor surface
+        floor_surface = np.sum(mask > 0)
 
         # Progress bar
-        c += 1
-        msg = f"[{'-' * c}{' ' * (n_img - c)}] {c}/{n_img}"
-        sys.stdout.write(msg)
-        sys.stdout.flush()
-        sys.stdout.write("\b" * len(msg))
+        n_img = len(other_img)
+        c = 0
+
+        for img, img_name in other_img:
+            # Get bounding boxes for image
+            img_bb, bbs = make_bb(img, ref_img, mask)
+
+            # Calculate occupied area
+            occupied_area = 0
+            for bb in bbs:
+                occupied_area += (bb[2] - bb[0]) * (bb[3] - bb[1])
+
+            # Add info to image
+            cv2.putText(img_bb, f"{len(bbs)} objects | Clutter {(occupied_area / floor_surface * 100):.2f}%", 
+                        (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 4, (0, 255, 0), 5, cv2.LINE_AA)
+
+            # Save image
+            cv2.imwrite(f"{images_folder}\{folder}\{re.sub('.JPG', '_bb.JPG', img_name)}", img_bb)
+
+            # Progress bar
+            c += 1
+            msg = f"[{'-' * c}{' ' * (n_img - c)}] {c}/{n_img}"
+            sys.stdout.write(msg)
+            sys.stdout.flush()
+            sys.stdout.write("\b" * len(msg))
+
+if __name__ == '__main__':
+    # Catch inputs
+    if len(sys.argv) > 1:
+        run(images_folder=sys.argv[1])
+    else:
+        run()
