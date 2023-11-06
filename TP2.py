@@ -10,13 +10,14 @@ from skimage.color import label2rgb
 from skimage.feature import canny
 from scipy import ndimage as ndi
 from skimage.filters import sobel
-from skimage import morphology
+from skimage import morphology, measure
 from scipy.stats import skew, kurtosis
 from sklearn.cluster import KMeans, AffinityPropagation, BisectingKMeans
 from skimage import graph
 from sklearn.feature_extraction import image
 from sklearn.cluster import spectral_clustering
 from sklearn.decomposition import PCA
+from skimage import exposure
 
 def load_images(folder: str = './images/TP2') -> List[np.array]:
     """ Loads all the images in the given folder into a list
@@ -348,6 +349,9 @@ def segment_image(img: np.array) -> np.array:
             # Apply background
             segmentation = slic_seg * bkg
 
+            # For display purposes
+            base_segmented_image = mark_boundaries(img, segmentation)
+
         
         # Section to try and explore line directions
         if False:
@@ -382,18 +386,32 @@ def segment_image(img: np.array) -> np.array:
             # Remove dark objects that havent been removed by bkg extraction (like reflections)
             for i in range(1, segmentation.max() + 1):
                 super_pix = cv2.bitwise_and(img, img, mask=(segmentation == i).astype(np.uint8))
-                if super_pix.mean() < 20/255:
+                if super_pix.mean() < 30/255:
                     segmentation[segmentation == i] = 0
 
         # Function to extract features from superpixel
         def extract_features(superpixel: np.array) -> np.array:
 
-            mean = np.mean(superpixel, axis=0)
-            std = np.std(superpixel, axis=0)
-            skewness = skew(superpixel, axis=0)
-            kurt = kurtosis(superpixel, axis=0)
+            # mean = np.mean(superpixel, axis=0)
+            # std = np.std(superpixel, axis=0)
+            # skewness = skew(superpixel, axis=0)
+            # kurt = kurtosis(superpixel, axis=0)
 
-            channel_features = np.array([mean, std, skewness, kurt]).flatten()
+            # channel_features = np.array([mean, std, skewness, kurt]).flatten()
+
+
+            mean = np.mean(superpixel, axis=(0, 1))
+            std = np.std(superpixel, axis=(0, 1))
+            skewness = skew(superpixel, axis=(0, 1))
+            kurt = kurtosis(superpixel, axis=(0, 1))
+
+            channel_features = np.array([mean, std, skewness, kurt]).flatten().tolist()
+            # channel_features = np.array([mean, std]).flatten().tolist()
+            # for i in range(1 if len(superpixel.shape) == 2 else superpixel.shape[2]):
+            #     hist_channel = cv2.calcHist([superpixel], [i], None, [256], [0, 256])[1:]
+            #     channel_features.append(np.argmax(hist_channel) + 1)
+
+            channel_features = np.array(channel_features)
             channel_features = np.nan_to_num(channel_features, 0)
 
             return channel_features
@@ -411,8 +429,8 @@ def segment_image(img: np.array) -> np.array:
             # channels = [image_hsv]
             # channels = [image_lab, image_hsv]
             # channels = [image_lab, blured_image]
-            # channels = [img_xyz]
-            channels = [image_lab, img_xyz]
+            channels = [img_xyz]
+            # channels = [image_lab, img_xyz]
             # channels = [image_lab, image_prepross]
 
             print("Extracted Channels")
@@ -437,7 +455,7 @@ def segment_image(img: np.array) -> np.array:
                     # Extract features
                     features = []
                     for channel in channels:
-                        features.extend(extract_features(channel[superpixel_mask]))
+                        features.extend(extract_features(cv2.bitwise_and(channel, channel, mask=superpixel_mask.astype(np.uint8))))
                     #   Extract Deg of luminance
                     # deg_of_lum = np.mean(0.299*R[superpixel_mask] + 0.587*G[superpixel_mask] + 0.114*B[superpixel_mask], axis=0)
                     # features.append(deg_of_lum)
@@ -456,6 +474,8 @@ def segment_image(img: np.array) -> np.array:
                     # exit()
                 
                 super_pixels_features = np.array(super_pixels_features)
+                # Normalize
+                # super_pixels_features = (super_pixels_features - super_pixels_features.min(axis=0)) / (super_pixels_features.max(axis=0) - super_pixels_features.min(axis=0))
 
                 # PCA visualization
                 # red_dim_feat_2d = PCA(n_components=2).fit_transform(super_pixels_features)
@@ -465,8 +485,6 @@ def segment_image(img: np.array) -> np.array:
                 # exit()
 
                 print(f"Extracted Features {clustering_iter}/{num_iters}")
-
-                base_segmented_image = mark_boundaries(img, segmentation)
                 
                 # Do clustering on features
                 # cluster_model = KMeans(n_clusters=15, n_init='auto')
@@ -480,7 +498,98 @@ def segment_image(img: np.array) -> np.array:
                 for i in range(len(super_pixels)):
                     segmentation[segmentation == super_pixels[i][0]] = super_pixels_cluster[i]
 
+                seg1 = mark_boundaries(img, segmentation)
                 print(f"Clustered {clustering_iter}/{num_iters}")
+
+        # Combine superpixels 2
+        if False:
+
+            # Get all img channels
+            B = img[:, :, 0]
+            G = img[:, :, 1]
+            R = img[:, :, 2]
+
+            # channels = [img_hsv]
+            # channels = [img_lab, img_hsv]
+            # channels = [img_lab, blured_image]
+            channels = [img_xyz]
+            # channels = [img_lab, img_xyz]
+            # channels = [img_lab, image_prepross]
+
+            print("Extracted Channels")
+
+            super_pixels = []
+            super_pixels_features = []
+
+            # Loop through superpixels and extract features
+            for j in range(1, segmentation.max() + 1):
+
+                superpixel_mask = segmentation == j
+                if superpixel_mask.sum() == 0:
+                    continue
+
+                # Extract features
+                features = []
+                for channel in channels:
+                    features.extend(extract_features(channel[superpixel_mask]))
+                #   Extract Deg of luminance
+                # deg_of_lum = np.mean(0.299*R[superpixel_mask] + 0.587*G[superpixel_mask] + 0.114*B[superpixel_mask], axis=0)
+                # features.append(deg_of_lum)
+                # Add the blured img features
+                # features.append(np.argmax(np.bincount(n_img[superpixel_mask])))
+                # Add superpixel location
+                # features.extend(np.mean(np.argwhere(superpixel_mask), axis=0))
+
+                # Extend mask
+                kernel = np.ones((3, 3), np.uint8) / 9
+                superpixel_mask_ext = cv2.dilate(superpixel_mask.astype(np.uint8), kernel, iterations=2)
+
+                # Store superpixel and feature
+                super_pixels.append((j, superpixel_mask, superpixel_mask_ext))
+                super_pixels_features.append(features)
+
+                # Show color histogram for superpixel
+                # plt.hist(img[superpixel_mask, 1].ravel(), 256, [0, 256])
+                # plt.show()
+                # exit()
+            
+            # Make array
+            super_pixels_features = np.array(super_pixels_features)
+            # Normalize
+            super_pixels_features = (super_pixels_features - super_pixels_features.min(axis=0)) / (super_pixels_features.max(axis=0) - super_pixels_features.min(axis=0))
+
+            # Combine superpixels
+            for curr_pix in range(len(super_pixels)):
+                for other_pix in range(curr_pix + 1, len(super_pixels)):
+                    # Check if superpixels overlap
+                    if np.any(np.logical_and(super_pixels[curr_pix][2], super_pixels[other_pix][2])):
+                        
+                        # Combine based on feature distance
+                        #   Check distance between features
+                        if np.linalg.norm(super_pixels_features[curr_pix] - super_pixels_features[other_pix]) < 0.3:
+                            # Set other pixel to same id as current pixel
+                            segmentation[segmentation == super_pixels[other_pix][0]] = super_pixels[curr_pix][0]
+                            super_pixels[other_pix] = (super_pixels[curr_pix][0], super_pixels[other_pix][1], super_pixels[other_pix][2])
+
+            if False:
+                # PCA visualization
+                # red_dim_feat_2d = PCA(n_components=2).fit_transform(super_pixels_features)
+                # # Plot clusters
+                # plt.scatter(red_dim_feat_2d[:, 0], red_dim_feat_2d[:, 1])
+                # plt.show()
+                # exit()
+                
+                # Do clustering on features
+                # cluster_model = KMeans(n_clusters=15, n_init='auto')
+                cluster_model = AffinityPropagation(random_state=42)
+                # cluster_model = BisectingKMeans(n_clusters=10, random_state=42)
+                super_pixels_cluster = cluster_model.fit_predict(super_pixels_features) + 1
+                
+                # Assign ids to superpixels
+                for i in range(len(super_pixels)):
+                    segmentation[segmentation == super_pixels[i][0]] = super_pixels_cluster[i]
+
+                print(f"Clustered")
 
     # Cuts
     if False:
@@ -526,7 +635,7 @@ def segment_image(img: np.array) -> np.array:
     # segmented_image = label2rgb(segmentation, img, kind='avg')
     segmented_image = mark_boundaries(img, segmentation)
 
-    return base_segmented_image, segmented_image
+    return base_segmented_image, seg1, segmented_image
     return image_prepross, segmented_image
     return image_prepross, segmentation / segmentation.max()
     return img, image_cont
@@ -540,11 +649,12 @@ def run():
 
     img = images[0]
 
-    img1, img2 = segment_image(img[0])
+    img1, img2, img3 = segment_image(img[0])
     cv2.imshow('Clean', img1)
     cv2.imshow('Segmented', img2)
+    cv2.imshow('Segmented 2', img3)
 
-    cv2.imshow(img[1], img[0])
+    # cv2.imshow(img[1], img[0])
 
     def test():
         im_lab = cv2.cvtColor(img[0], cv2.COLOR_BGR2LAB)
